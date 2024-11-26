@@ -6,9 +6,15 @@ from tqdm import tqdm
 import logging
 from datetime import datetime
 import os
-from lib.updater import updateNow
 from git import Repo
 import subprocess
+
+# Support for MultiThreading
+from concurrent.futures import ThreadPoolExecutor
+
+# Support for slow download to mimic human traffic, reducing the risk of being banned or flagged
+import random
+import time
 
 # Setting up rich library
 from rich.console import Console
@@ -25,7 +31,7 @@ console = Console(theme=custom_theme)
 # this console for saving to file
 consoleSave = Console(record=True)
 
-VERSION="v3.0.0"
+VERSION="v3.1.0"
 API_URL = "https://api.github.com/repos/PakCyberbot/FBI-MostWanted/releases/latest"
 
 class Fbi:
@@ -142,23 +148,36 @@ class Fbi:
 
     # Getting list and information of top wanted persons        
     def wanted(self):
-        count=0
-        
-        for item in self.response:
-            # reward filter
-            if args.reward:
-                if not self.reward(item):
-                    continue
-            count += 1 
-            consoleSave.print(self.table_view(self.attr_dict,item,Count=count))
-            # records seperator
-            consoleSave.print(f'\n\n{"*"*100}\n', justify="center")
+        if not args.silent:
+            count=0
+            
+            for item in self.response:
+                # reward filter
+                if args.reward:
+                    if not self.reward(item):
+                        continue
+                count += 1 
+                consoleSave.print(self.table_view(self.attr_dict,item,Count=count))
+                # records seperator
+                consoleSave.print(f'\n\n{"*"*100}\n', justify="center")
         
         
         # Storing images seperately
         if args.images:
-            for item in self.response:
-                print(self.images(item))
+
+        # Support for slow download to mimic human traffic, reducing the risk of being banned or flagged
+            if args.slow:
+                for item in self.response:
+                    print(self.images(item))
+                    time.sleep(random.randint(20, 70))
+                    
+            else:
+                # Multithreading implementation for downloading files   
+                with ThreadPoolExecutor() as executor:
+                    img_results = executor.map(self.images, self.response)
+                    for i in img_results:
+                        print(i)
+
         # Dumping output to a file; invoked with --dump
         if args.dump:
             self.dump()
@@ -167,8 +186,19 @@ class Fbi:
             final_directory = os.path.join(current_directory, "wanted_list")
             if not os.path.exists(final_directory):
                 os.makedirs(final_directory)
-            for item in self.response:
-                print(self.download(item,dir=final_directory))
+
+            # Support for slow download to mimic human traffic, reducing the risk of being banned or flagged
+            if args.slow:
+                for item in self.response:
+                    print(self.download(item,dir=final_directory))
+                    time.sleep(random.randint(20, 70))
+            else:
+                # Multithreading implementation for downloading files   
+                with ThreadPoolExecutor() as executor:
+                    item_results = executor.map(self.download, self.response, (final_directory for i in range(0,len(self.response))))
+                    for i in item_results:
+                        print(i)
+
             exit()
 
             
@@ -181,7 +211,8 @@ class Fbi:
                 print(f"[X] No reward Here")
                 return None
         
-        consoleSave.print(self.table_view(self.attr_dict,self.response))
+        if not args.silent:
+            consoleSave.print(self.table_view(self.attr_dict,self.response))
 
         # storing images seperately
         if args.images:
@@ -288,6 +319,12 @@ class Fbi:
                 for chunk in tqdm(uri.iter_content(chunk_size=1024),desc=f"[~] Downloading {file_name}.{file_type}"):
                     if chunk:
                         file.write(chunk)
+            
+            # Also gives some time to download images of the single record 
+            if args.slow:
+                time.sleep(random.randint(5, 15))
+                
+
                 
         return f"[✓] Images saved with the name {file_name}-<number>__<caption>"
 
@@ -353,7 +390,9 @@ parser.add_argument('--records','-e',help='number of records to fetch with --wan
 parser.add_argument('--wanted-person','-p',help='return a dossier of a single wanted person; provide person\'s ID#',dest='wanted_person',metavar='<ID#>')
 parser.add_argument('--images','-i',help='download images seperately in a folder. FileName Format: name+number+caption',action='store_true')
 parser.add_argument('--download','-g',help='download persons\' casefile (beta)',action='store_true')
+parser.add_argument('--slow', help='Downloads records slowly and mimics human traffic.',action='store_true')
 parser.add_argument('--reward','-r',help='Filter out records that contain a reward',action='store_true')
+parser.add_argument('--silent','-s',help='Disable Output',action='store_true')
 parser.add_argument('--verbose','-v',help='enable verbosity',action='store_true')
 parser.add_argument('--update','-u',help='Update to the latest version',action='store_true')
 parser.add_argument('--version',version=f'{VERSION}',action='version')
